@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>亞大醫院 - 無軌移動櫃 3D模擬 (完整黑線格局)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+        }
+        .legend-dashed {
+            display: inline-block;
+            width: 24px;
+            height: 2px;
+            border-top: 2px dashed #4a90e2;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        .legend-solid {
+            display: inline-block;
+            width: 24px;
+            height: 4px;
+            background-color: #333;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- UI 控制面板 -->
+    <div class="absolute top-4 left-4 z-10 glass-panel p-5 rounded-2xl max-w-sm w-full max-h-[95vh] overflow-y-auto">
+        <div class="flex items-center space-x-3 mb-4">
+            <div class="w-2 h-8 bg-blue-600 rounded"></div>
+            <div>
+                <h1 class="text-xl font-bold text-gray-800">神助物流設備</h1>
+                <p class="text-sm text-gray-500">亞大醫院 A方案 - 依圖面黑線建置</p>
+            </div>
+        </div>
+
+        <!-- 規格資訊 -->
+        <div class="space-y-2 mb-4 bg-white/80 p-3 rounded-lg border border-gray-200 shadow-sm">
+            <div class="flex items-center justify-between text-sm font-bold text-gray-800 mb-1">
+                <div class="flex items-center">
+                    <span class="legend-solid"></span>
+                    <span>實體牆面 (黑線範圍)</span>
+                </div>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500 mb-2">
+                <span>依據圖面比例，向右延伸至完整空間</span>
+            </div>
+
+            <div class="h-px bg-gray-300 w-full my-2"></div>
+
+            <div class="flex items-center justify-between text-sm font-bold text-blue-700 mb-1">
+                <div class="flex items-center">
+                    <span class="legend-dashed"></span>
+                    <span>圖面使用範圍</span>
+                </div>
+            </div>
+            <div class="flex justify-between text-sm text-gray-800 font-semibold">
+                <span>實際寬: 22050 mm</span>
+                <span>實際深: 11450 mm</span>
+            </div>
+            <div class="flex justify-between text-xs text-blue-600 mt-1">
+                <span>虛線範圍: 9324 mm</span>
+                <span>虛線深: 6200 mm</span>
+            </div>
+            
+            <div class="h-px bg-gray-300 w-full my-2"></div>
+            
+            <div class="flex justify-between text-xs text-gray-600">
+                <span>1號: D852 (3層) <span class="text-orange-500 font-semibold">雙面</span></span>
+                <span>6號: D612 (最前)</span>
+            </div>
+            <div class="text-xs text-gray-500">2~5號: D852 (3層，單面)</div>
+            <div class="flex justify-between text-xs text-gray-800 font-semibold mt-2 bg-blue-50 p-1.5 rounded border border-blue-100">
+                <span>開啟走道:</span>
+                <span class="text-blue-700">900 mm</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-600 mt-1">
+                <span>前壁主門 (2400mm):</span>
+                <span>X = 11050mm</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-600">
+                <span>後壁側門 (1200mm):</span>
+                <span>X = 19330mm</span>
+            </div>
+        </div>
+
+        <!-- 場景控制 -->
+        <div class="mb-4">
+            <button id="btn-toggle-room" class="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold py-2 px-4 rounded-lg transition-colors shadow-sm text-sm border border-indigo-200">
+                👁️ 隱藏 實體牆面 (僅看櫃體)
+            </button>
+        </div>
+
+        <h2 class="text-md font-semibold text-gray-700 mb-2">選擇開啟走道 (中控連動)</h2>
+        <div class="grid grid-cols-2 gap-2" id="controls">
+            <!-- 按鈕將由 JS 動態生成 -->
+        </div>
+        
+        <p class="mt-4 text-xs text-gray-400 text-center">
+            提示: 點擊拖曳可旋轉視角，滾動滑鼠可縮放
+        </p>
+    </div>
+
+    <!-- 3D 畫布容器 -->
+    <div id="canvas-container"></div>
+
+    <script>
+        // 1. 場景、相機、渲染器初始化
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xeef2f5);
+
+        // ==========================================
+        // ★ 尺寸參數 (依空場地PDF) ★
+        // ==========================================
+        const USABLE_WIDTH = 9.324;   // 配置圖使用範圍寬 (虛線標示)
+        const CAB_ZONE_DEPTH = 6.200; // 配置圖使用範圍深 (虛線標示)
+
+        // 空場地實際尺寸
+        const ROOM_DEPTH = 11.450;        // 實際房間深度 11450mm
+        const ACTUAL_ROOM_WIDTH = 22.050; // 實際房間總寬 (11050+2400+8600) mm
+
+        const CAB_WIDTH = 9.195;   // 櫃體總寬
+        const CAB_HEIGHT = 2.236;  // 櫃體高度
+        const AISLE_WIDTH = 0.900; // 走道設定 900mm
+
+        // 依配置圖：櫃體靠前門側，後方為大空地
+        // 後方空地 = 11450 - 6200 = 5250mm
+        const CAB_Z_OFFSET = ROOM_DEPTH - CAB_ZONE_DEPTH; // 5.25m
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
+        // 從前方斜上方俯視，能同時看到前門側的櫃體與後方大空地
+        camera.position.set(ACTUAL_ROOM_WIDTH / 2, 20, ROOM_DEPTH + 16);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        // 視角中心對準櫃體區域中心 (靠前門側)
+        controls.target.set(CAB_WIDTH / 2, 1.1, CAB_Z_OFFSET + CAB_ZONE_DEPTH / 2);
+        controls.maxDistance = 80;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05;
+        controls.update();
+
+        // 2. 燈光設定
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        dirLight.position.set(ACTUAL_ROOM_WIDTH / 2, 20, ROOM_DEPTH + 8);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0xffffff, 0.3, 20);
+        pointLight.position.set(USABLE_WIDTH / 2, 4, ROOM_DEPTH / 2);
+        scene.add(pointLight);
+
+        // 3. 建立場景
+        const roomGroup = new THREE.Group();
+        scene.add(roomGroup);
+
+        // 地板 (覆蓋整個真實房間)
+        const floorGeo = new THREE.PlaneGeometry(ACTUAL_ROOM_WIDTH + 2, ROOM_DEPTH + 4);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0xd4d8db, roughness: 0.9 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.set(ACTUAL_ROOM_WIDTH / 2, 0, ROOM_DEPTH / 2);
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // ★★★ 9324 x 6200 配置圖使用範圍 (藍色虛線) - 靠前門側 ★★★
+        const points = [];
+        points.push(new THREE.Vector3(0, 0, CAB_Z_OFFSET));
+        points.push(new THREE.Vector3(USABLE_WIDTH, 0, CAB_Z_OFFSET));
+        points.push(new THREE.Vector3(USABLE_WIDTH, 0, CAB_Z_OFFSET + CAB_ZONE_DEPTH));
+        points.push(new THREE.Vector3(0, 0, CAB_Z_OFFSET + CAB_ZONE_DEPTH));
+        points.push(new THREE.Vector3(0, 0, CAB_Z_OFFSET));
+
+        const edgesGeo = new THREE.BufferGeometry().setFromPoints(points);
+        const dashedMat = new THREE.LineDashedMaterial({ 
+            color: 0x4a90e2, 
+            linewidth: 2, 
+            scale: 1, 
+            dashSize: 0.2, 
+            gapSize: 0.15  
+        });
+        const areaLine = new THREE.Line(edgesGeo, dashedMat);
+        areaLine.computeLineDistances(); 
+        areaLine.position.set(0, 0.02, 0); // 浮貼於地面
+        scene.add(areaLine);
+
+        // --- 依空場地PDF實際尺寸建立牆面 ---
+        // 房間: 寬22050mm × 深11450mm
+        // 前壁門: X=11050, 寬2400mm (雙開門)
+        // 後壁: 0~19330mm 實牆，19330mm 處有單扇門 (約1200mm)
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 1 });
+        const wallHeight = 3.2;
+        const wallThickness = 0.2;
+
+        function createWall(x, z, w, d) {
+            const geo = new THREE.BoxGeometry(w, wallHeight, d);
+            const mesh = new THREE.Mesh(geo, wallMat);
+            mesh.position.set(x + w/2, wallHeight/2, z + d/2);
+            mesh.receiveShadow = true;
+            mesh.castShadow = true;
+            return mesh;
+        }
+
+        // ── 左側牆 (X=0) ──
+        roomGroup.add(createWall(-wallThickness, 0, wallThickness, ROOM_DEPTH));
+
+        // ── 右側牆 (X=22050mm) ──
+        roomGroup.add(createWall(ACTUAL_ROOM_WIDTH, 0, wallThickness, ROOM_DEPTH));
+
+        // ── 後方牆 (Z=0): 0→19330mm 實牆，19330→20530mm 單扇門，20530→22050mm 實牆 ──
+        const backDoorX = 19.330;
+        const backDoorW = 1.200;
+        roomGroup.add(createWall(-wallThickness, -wallThickness, backDoorX + wallThickness, wallThickness));
+        roomGroup.add(createWall(backDoorX + backDoorW, -wallThickness, ACTUAL_ROOM_WIDTH - (backDoorX + backDoorW) + wallThickness, wallThickness));
+        // 後方門上楣
+        const backTopGeo = new THREE.BoxGeometry(backDoorW, wallHeight - 2.1, wallThickness);
+        const backTopWall = new THREE.Mesh(backTopGeo, wallMat);
+        backTopWall.position.set(backDoorX + backDoorW/2, 2.1 + (wallHeight - 2.1)/2, -wallThickness/2);
+        roomGroup.add(backTopWall);
+
+        // ── 前方牆 (Z=11450mm) 與雙開主門 ──
+        // 門: 11050mm 處，寬 2400mm
+        const doorWidth = 2.4;   // 2400mm
+        const doorHeight = 2.2;  // 門高
+        const doorX = 11.050;    // 門左邊緣 X=11050mm
+
+        // 左前牆 (X=0 到 門左)
+        roomGroup.add(createWall(-wallThickness, ROOM_DEPTH, doorX + wallThickness, wallThickness));
+        // 右前牆 (門右 到 房間右側)
+        roomGroup.add(createWall(doorX + doorWidth, ROOM_DEPTH, ACTUAL_ROOM_WIDTH - (doorX + doorWidth) + wallThickness, wallThickness));
+        // 門上楣
+        const topWallGeo = new THREE.BoxGeometry(doorWidth, wallHeight - doorHeight, wallThickness);
+        const topWall = new THREE.Mesh(topWallGeo, wallMat);
+        topWall.position.set(doorX + doorWidth/2, doorHeight + (wallHeight - doorHeight)/2, ROOM_DEPTH + wallThickness/2);
+        roomGroup.add(topWall);
+
+        // 建立醫療雙開門
+        function createMedicalDoor(x, z, width, height) {
+            const doorGroup = new THREE.Group();
+            doorGroup.position.set(x + width/2, 0, z);
+
+            const leafMat = new THREE.MeshStandardMaterial({color: 0xdae3e8, roughness: 0.3});
+            const glassMat = new THREE.MeshStandardMaterial({color: 0x88ccff, transparent: true, opacity: 0.5});
+            const handleMat = new THREE.MeshStandardMaterial({color: 0xaaaaaa, metalness: 0.8});
+
+            // 左門片
+            const leftLeafGroup = new THREE.Group();
+            leftLeafGroup.position.set(-width/2, 0, 0); 
+            const leftLeaf = new THREE.Mesh(new THREE.BoxGeometry(width/2, height, 0.05), leafMat);
+            leftLeaf.position.set(width/4, height/2, 0);
+            const leftGlass = new THREE.Mesh(new THREE.BoxGeometry(0.15, height*0.5, 0.06), glassMat);
+            leftGlass.position.set(width/4, height/2 + 0.2, 0);
+            const leftHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), handleMat);
+            leftHandle.position.set(width/2 - 0.1, height/2, 0.05);
+            leftLeafGroup.add(leftLeaf); leftLeafGroup.add(leftGlass); leftLeafGroup.add(leftHandle);
+            leftLeafGroup.rotation.y = -Math.PI / 5; 
+            doorGroup.add(leftLeafGroup);
+
+            // 右門片
+            const rightLeafGroup = new THREE.Group();
+            rightLeafGroup.position.set(width/2, 0, 0); 
+            const rightLeaf = new THREE.Mesh(new THREE.BoxGeometry(width/2, height, 0.05), leafMat);
+            rightLeaf.position.set(-width/4, height/2, 0);
+            const rightGlass = new THREE.Mesh(new THREE.BoxGeometry(0.15, height*0.5, 0.06), glassMat);
+            rightGlass.position.set(-width/4, height/2 + 0.2, 0);
+            const rightHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), handleMat);
+            rightHandle.position.set(-width/2 + 0.1, height/2, 0.05);
+            rightLeafGroup.add(rightLeaf); rightLeafGroup.add(rightGlass); rightLeafGroup.add(rightHandle);
+            rightLeafGroup.rotation.y = Math.PI / 4; 
+            doorGroup.add(rightLeafGroup);
+
+            return doorGroup;
+        }
+        // 前方主雙開門
+        roomGroup.add(createMedicalDoor(doorX, ROOM_DEPTH + wallThickness/2, doorWidth, doorHeight));
+
+        // 後方單扇門 (右後角, X=19330mm, Z=0)
+        function createSingleDoor(x, z, width, height) {
+            const dg = new THREE.Group();
+            dg.position.set(x, 0, z);
+            const leafMat = new THREE.MeshStandardMaterial({color: 0xdae3e8, roughness: 0.3});
+            const handleMat = new THREE.MeshStandardMaterial({color: 0xaaaaaa, metalness: 0.8});
+            const leaf = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.05), leafMat);
+            leaf.position.set(width/2, height/2, 0);
+            dg.add(leaf);
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), handleMat);
+            handle.position.set(width - 0.1, height/2, 0.05);
+            dg.add(handle);
+            dg.rotation.y = -Math.PI / 4; // 45° 開啟狀態
+            return dg;
+        }
+        roomGroup.add(createSingleDoor(backDoorX, -wallThickness/2, backDoorW, 2.1));
+
+        // 4. 櫃體生成函數
+        function createCabinetBlock(width, height, depth, cols, rows, doubleSided = false) {
+            const group = new THREE.Group();
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.4 });
+            const shelfMat = new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.5 });
+            const baseMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+            const itemColors = [0x8ca8cc, 0xc1a18a, 0x8fbc8f, 0xe2c792, 0xa9a9a9];
+
+            const t = 0.03; 
+            const baseY = 0.15; 
+
+            const tbGeo = new THREE.BoxGeometry(width, t, depth);
+            const top = new THREE.Mesh(tbGeo, frameMat); top.position.y = height - t/2; group.add(top);
+            const bottom = new THREE.Mesh(tbGeo, frameMat); bottom.position.y = baseY + t/2; group.add(bottom);
+            const base = new THREE.Mesh(new THREE.BoxGeometry(width, baseY, depth - 0.05), baseMat);
+            base.position.y = baseY / 2; group.add(base);
+
+            const sideGeo = new THREE.BoxGeometry(t, height - baseY - t*2, depth);
+            const leftSide = new THREE.Mesh(sideGeo, frameMat); leftSide.position.set(-width/2 + t/2, baseY + t + (height - baseY - t*2)/2, 0); group.add(leftSide);
+            const rightSide = new THREE.Mesh(sideGeo, frameMat); rightSide.position.set(width/2 - t/2, baseY + t + (height - baseY - t*2)/2, 0); group.add(rightSide);
+
+            const colWidth = (width - t*2) / cols;
+            const innerHeight = height - baseY - t*2;
+            const rowHeight = innerHeight / rows;
+            const divGeo = new THREE.BoxGeometry(t, innerHeight, depth * 0.9);
+            for(let i=1; i<cols; i++) {
+                const div = new THREE.Mesh(divGeo, frameMat);
+                div.position.set(-width/2 + t + i*colWidth, baseY + t + innerHeight/2, 0);
+                group.add(div);
+            }
+            // 後板：雙面櫃不加後板（兩面皆可放物品）
+            if (!doubleSided) {
+                const backPanel = new THREE.Mesh(new THREE.BoxGeometry(width - t*2, innerHeight, t/2), frameMat);
+                backPanel.position.set(0, baseY + t + innerHeight/2, -depth/2 + t/4);
+                group.add(backPanel);
+            }
+
+            const itemH = Math.min(0.25, rowHeight * 0.7);
+            const shelfGeo = new THREE.BoxGeometry(width - t*2, t, depth * 0.95);
+            const itemGeo = new THREE.BoxGeometry(0.2, itemH, 0.25);
+            for(let r=1; r<rows; r++) {
+                const shelf = new THREE.Mesh(shelfGeo, shelfMat);
+                shelf.position.set(0, baseY + t + r*rowHeight, 0);
+                group.add(shelf);
+                // 雙面櫃：前面和後面各放物品；單面：隨機擺放
+                const sides = doubleSided ? [1, -1] : [(Math.random() > 0.5 ? 1 : -1)];
+                for(let c=0; c<cols; c++) {
+                    sides.forEach(side => {
+                        if (Math.random() > 0.35) {
+                            const itemMat = new THREE.MeshStandardMaterial({ color: itemColors[Math.floor(Math.random() * itemColors.length)] });
+                            const item = new THREE.Mesh(itemGeo, itemMat);
+                            const posX = -width/2 + t + c*colWidth + colWidth/2;
+                            const posY = baseY + t + (r-1)*rowHeight + t/2 + itemH/2;
+                            const posZ = side * (depth/2 - 0.18); // 靠近前/後面板
+                            item.position.set(posX, posY, posZ);
+                            group.add(item);
+                        }
+                    });
+                }
+            }
+
+            // 方向盤 (右側)
+            group.userData.wheels = [];
+            const wheelGroup = new THREE.Group();
+            wheelGroup.add(new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.02, 16, 32), new THREE.MeshStandardMaterial({color: 0x4a90e2, metalness: 0.6})));
+            for(let i=0; i<3; i++) {
+                const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.18), new THREE.MeshStandardMaterial({color: 0xaaaaaa, metalness: 0.8}));
+                spoke.position.y = 0.09;
+                const pivot = new THREE.Group(); pivot.rotation.z = (Math.PI*2/3) * i; pivot.add(spoke);
+                wheelGroup.add(pivot);
+            }
+            const centerCap = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.03), new THREE.MeshStandardMaterial({color: 0x333333}));
+            centerCap.rotation.x = Math.PI/2; wheelGroup.add(centerCap);
+            wheelGroup.position.set(width/2 + t + 0.02, 1.2, 0); 
+            wheelGroup.rotation.y = Math.PI/2;
+            group.add(wheelGroup);
+            group.userData.wheels.push(wheelGroup);
+
+            group.traverse(child => { if(child.isMesh) { child.castShadow = true; child.receiveShadow = true; } });
+            return group;
+        }
+
+        // 5. 建立系統架構 (1~5: D852, 6: D612)
+        // 依配置圖：D852×5 在後方（靠後牆），D612×1 在最前方
+        // 最後方(1號)為雙面櫃：兩面皆可放置物品
+        const cabSpecs = [
+            { depth: 0.852, rows: 3, doubleSided: true  }, // 1號 最後方，D852，雙面
+            { depth: 0.852, rows: 3, doubleSided: false }, // 2號
+            { depth: 0.852, rows: 3, doubleSided: false }, // 3號
+            { depth: 0.852, rows: 3, doubleSided: false }, // 4號
+            { depth: 0.852, rows: 3, doubleSided: false }, // 5號
+            { depth: 0.612, rows: 7, doubleSided: false }, // 6號 最前方，D612
+        ];
+        
+        const blocks = [];
+        const targetZs = [];
+        const currentZs = [];
+
+        cabSpecs.forEach((spec, index) => {
+            const block = createCabinetBlock(CAB_WIDTH, CAB_HEIGHT, spec.depth, 10, spec.rows, spec.doubleSided);
+            // 櫃體 X 軸靠左牆：X 設為 寬度/2 即切齊 X=0
+            block.position.x = CAB_WIDTH / 2; 
+            scene.add(block);
+            blocks.push(block);
+            targetZs.push(0);
+            currentZs.push(0);
+        });
+
+        // 6. 動畫與邏輯控制 (精準 900mm 走道)
+        // 所有 Z 計算皆從 CAB_Z_OFFSET 開始，讓櫃體靠前門側
+        function setAisle(openIdx) {
+            let curZ = CAB_Z_OFFSET; // 從偏移量開始堆疊
+
+            for(let i=0; i<blocks.length; i++) {
+                if (i === openIdx) {
+                    curZ += AISLE_WIDTH;
+                }
+
+                targetZs[i] = curZ + cabSpecs[i].depth / 2;
+                curZ += cabSpecs[i].depth;
+            }
+        }
+
+        // 初始狀態：全閉合 (走道在最前方)
+        setAisle(6);
+        for(let i=0; i<blocks.length; i++) {
+            blocks[i].position.z = targetZs[i];
+            currentZs[i] = targetZs[i];
+        }
+
+        // UI 按鈕綁定
+        const btnConfigs = [
+            { label: "最前方走道 (預設)", idx: 6, cls: "col-span-2 bg-gray-800 hover:bg-gray-700 text-white shadow-md border-transparent" },
+            { label: "5 - 6 號櫃 之間", idx: 5, cls: "bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300" },
+            { label: "4 - 5 號櫃 之間", idx: 4, cls: "bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300" },
+            { label: "3 - 4 號櫃 之間", idx: 3, cls: "bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300" },
+            { label: "2 - 3 號櫃 之間", idx: 2, cls: "bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300" },
+            { label: "1 - 2 號櫃 之間", idx: 1, cls: "bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300" },
+            { label: "最後方 (牆↔1號雙面)", idx: 0, cls: "bg-orange-50 text-orange-700 border-orange-300 hover:bg-orange-100 hover:border-orange-400" }
+        ];
+
+        const controlsDiv = document.getElementById('controls');
+        btnConfigs.forEach(cfg => {
+            const btn = document.createElement('button');
+            btn.className = `font-medium py-2 px-3 rounded-lg transition-all text-sm border ${cfg.cls}`;
+            btn.innerText = cfg.label;
+            btn.onclick = () => setAisle(cfg.idx);
+            controlsDiv.appendChild(btn);
+        });
+
+        // 房間顯示切換功能
+        let isRoomVisible = true;
+        document.getElementById('btn-toggle-room').onclick = (e) => {
+            isRoomVisible = !isRoomVisible;
+            roomGroup.visible = isRoomVisible;
+            e.target.innerText = isRoomVisible ? "👁️ 隱藏 實體牆面 (僅看櫃體)" : "👁️‍🗨️ 顯示 實體牆面 (黑線範圍)";
+            e.target.className = isRoomVisible 
+                ? "w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold py-2 px-4 rounded-lg transition-colors shadow-sm text-sm border border-indigo-200"
+                : "w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold py-2 px-4 rounded-lg transition-colors shadow-sm text-sm border border-gray-300";
+        };
+
+        // 7. 渲染迴圈
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            const moveSpeed = 4.0; 
+
+            for(let i=0; i<blocks.length; i++) {
+                const diff = targetZs[i] - currentZs[i];
+                if (Math.abs(diff) > 0.001) {
+                    const step = diff * moveSpeed * delta;
+                    currentZs[i] += step;
+                    blocks[i].position.z = currentZs[i];
+                    
+                    if (blocks[i].userData.wheels) {
+                        blocks[i].userData.wheels.forEach(w => w.rotation.z -= step * 4); 
+                    }
+                }
+            }
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
